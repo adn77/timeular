@@ -62,7 +62,7 @@ namespace Timeular
                 string jsonString = File.ReadAllText(configFileName);
                 jsonConfig settings = JsonConvert.DeserializeObject<jsonConfig>(jsonString);
                 apiToken = settings.api_token;
-                if( apiToken == "" || apiToken is null)
+                if (apiToken == "" || apiToken is null)
                 {
                     Console.WriteLine("Please edit the the config file: " + configFileName);
                     Console.ReadKey();
@@ -90,7 +90,7 @@ namespace Timeular
 
             // Initialize what's the state in the time tracking application
             GetActiveActivity();
-            
+
             // Prepare the BLE watcher
             string[] requestedProperties = { "System.Devices.Aep.DeviceAddress", "System.Devices.Aep.IsConnected" };
             DeviceWatcher deviceWatcher = DeviceInformation.CreateWatcher(
@@ -113,7 +113,7 @@ namespace Timeular
             {
                 // wait for keypress if connected
                 //  or search otherwise
-                if(!connected)
+                if (!connected)
                 {
                     found = false;
                     // Start the watcher until Timeular device has been found
@@ -130,17 +130,22 @@ namespace Timeular
                         {
                             // try to connect
                             bleDevice = await BluetoothLEDevice.FromIdAsync(device.Id);
+
+
                             // register connection status changed event
                             bleDevice.ConnectionStatusChanged += BleDevice_ConnectionStatusChanged;
+                            bleDevice.NameChanged += BleDevice_NameChanged;
+                            bleDevice.GattServicesChanged += BleDevice_GattServicesChanged;
+
 
                             // try to read specific Gatt service uuid (ORIENTATION_SERVICE)
-                            GattDeviceServicesResult result = await bleDevice.GetGattServicesForUuidAsync(new Guid(ORIENTATION_SERVICE) );
+                            GattDeviceServicesResult result = await bleDevice.GetGattServicesForUuidAsync(new Guid(ORIENTATION_SERVICE));
                             if (result.Status == GattCommunicationStatus.Success)
                             {
                                 Console.WriteLine("Found Orientation Service");
                                 // try to read specific Gatt charactreistic uuid (ORIENTATION_CHARACTERISTICS)
                                 GattCharacteristicsResult res = await result.Services[0].GetCharacteristicsForUuidAsync(new Guid(ORIENTATION_CHARACTERISTICS));
-                                if ( res.Status == GattCommunicationStatus.Success)
+                                if (res.Status == GattCommunicationStatus.Success)
                                 {
                                     Console.WriteLine("Found Orientation Characteristics");
                                     // read current characteristics value (current orientation) as start position of the tracker
@@ -230,6 +235,20 @@ namespace Timeular
             }
             bleDevice.Dispose();
         }
+        private static void BleDevice_NameChanged(BluetoothLEDevice sender, object args)
+        {
+            Console.WriteLine("NameChanged:" + args.ToString());
+        }
+
+        private static void BleDevice_GattServicesChanged(BluetoothLEDevice sender, object args)
+        {
+            Console.WriteLine("GattServiceChanged:");
+        }
+
+        private static void BleDevice_ConnectionParametersChanged(BluetoothLEDevice sender, object args)
+        {
+            Console.WriteLine("ConnectionParametersChanged:" + args.ToString());
+        }
 
         private static void BleDevice_ConnectionStatusChanged(BluetoothLEDevice sender, object args)
         {
@@ -248,7 +267,7 @@ namespace Timeular
         private static void DeviceWatcher_Added(DeviceWatcher sender, DeviceInformation args)
         {
             // this event is triggered once a new BLE device has been found
-            if (args.Name.Contains("Timeular") )
+            if (args.Name.Contains("Timeular"))
             {
                 // if the name conatains the string "Timeular", the "device" varible gets set => continue in Main thread
                 Console.WriteLine("Connecting to " + args.Name);
@@ -305,10 +324,10 @@ namespace Timeular
                 var json = await response.Content.ReadAsStringAsync();
                 // JToken can take care of objects and arrays
                 JToken res = JToken.Parse(json);
-                if( res.HasValues )
+                if (res.HasValues)
                 {
                     // check if the current activity's project ID is in our list of sides
-                    orientation = Array.FindIndex(sides, x => x.ToString() == res[0]["project"]["id"].ToString() );
+                    orientation = Array.FindIndex(sides, x => x.ToString() == res[0]["project"]["id"].ToString());
                     // track the current activity's ID in lastActivity as it's required when stopping/modifying an activity
                     lastActivity = res[0]["id"];
                     ShowMessage("Timeular", "Currently Tracking " + res[0]["project"]["customer"]["name"].ToString());
@@ -356,3 +375,4 @@ namespace Timeular
         }
     }
 }
+
