@@ -48,6 +48,7 @@ namespace Timeular
         private static string[] sides;
         private static HttpClient http;
         private static object lastActivity = null;
+        private static DateTime lastStart = DateTime.UtcNow;
 
         static async Task Main(string[] args)
         {
@@ -330,6 +331,7 @@ namespace Timeular
                     orientation = Array.FindIndex(sides, x => x.ToString() == res[0]["project"]["id"].ToString());
                     // track the current activity's ID in lastActivity as it's required when stopping/modifying an activity
                     lastActivity = res[0]["id"];
+                    lastStart = (DateTime)res[0]["begin"];
                     ShowMessage("Timeular", "Currently Tracking " + res[0]["project"]["customer"]["name"].ToString());
                 }
             }
@@ -341,6 +343,11 @@ namespace Timeular
         }
         private static async void StartActivity(string projectId, string activity)
         {
+            // if the previous time entry is shorter than 60s, delete it
+            if (DateTime.Now.Subtract(lastStart).TotalSeconds < 60 && lastActivity != null)
+            {
+                DeleteActivity(lastActivity.ToString());
+            }
             // create a new activity in Kimai for the project matching the tracker's current side
             string data = "{\"begin\":\"" + DateTime.Now.ToString("s") + "\",\"project\":" + projectId + ",\"activity\":" + activity + "}";
             try
@@ -359,17 +366,38 @@ namespace Timeular
         }
         private static async void StopActivity(string activity)
         {
-            // stop activity in Kimai referenced by lastActivity
+            // if the previous time entry is shorter than 60s, delete it
+            if (DateTime.Now.Subtract(lastStart).TotalSeconds < 60)
+            {
+                DeleteActivity(activity);
+            }
+            else
+            {
+                // stop activity in Kimai referenced by activity
+                try
+                {
+                    HttpResponseMessage response = await http.GetAsync(apiHost + "/api/timesheets/" + activity + "/stop");
+                }
+                catch (HttpRequestException e)
+                {
+                    // TODO: in case an activity cannot be stopped due to the duration exceeding the max. allowed duration
+                    //       the activity needs to be modified with an end-date
+                    //        PATCH /api/timesheets/{id}
+                    ShowMessage("Timeular ERROR", "Could not stop activity!!!");
+                    Console.WriteLine("Error :" + e.Message);
+                }
+            }
+        }
+        private static async void DeleteActivity(string activity)
+        {
+            // delete activity in Kimai referenced by activity
             try
             {
-                HttpResponseMessage response = await http.GetAsync(apiHost + "/api/timesheets/" + activity + "/stop");
+                HttpResponseMessage response = await http.DeleteAsync(apiHost + "/api/timesheets/" + activity);
             }
             catch (HttpRequestException e)
             {
-                // TODO: in case an activity cannot be stopped due to the duration exceeding the max. allowed duration
-                //       the activity needs to be modified with an end-date
-                //        PATCH /api/timesheets/{id}
-                ShowMessage("Timeular ERROR", "Could not stop activity!!!");
+                ShowMessage("Timeular ERROR", "Could not delete activity!!!");
                 Console.WriteLine("Error :" + e.Message);
             }
         }
