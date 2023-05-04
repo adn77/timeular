@@ -3,8 +3,10 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Data.Xml.Dom;
@@ -47,11 +49,14 @@ namespace Timeular
         private static string defaultActivityId;
         private static string[] sides;
         private static HttpClient http;
-        private static object lastActivity = null;
+        private static string lastActivity = null;
         private static DateTime lastStart = DateTime.UtcNow;
 
         static async Task Main(string[] args)
         {
+            // quit if this program is already running (e.g. a toast message was clicked)
+            if (System.Diagnostics.Process.GetProcessesByName(System.IO.Path.GetFileNameWithoutExtension(System.Reflection.Assembly.GetEntryAssembly().Location)).Count() > 1) return;
+
             // using SpecialFolder.Personal since it's easier to find than ApplicationFolder
             string configPath = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal);
             string fileName = "timeular.json";
@@ -135,8 +140,8 @@ namespace Timeular
 
                             // register connection status changed event
                             bleDevice.ConnectionStatusChanged += BleDevice_ConnectionStatusChanged;
-                            bleDevice.NameChanged += BleDevice_NameChanged;
                             bleDevice.GattServicesChanged += BleDevice_GattServicesChanged;
+                            bleDevice.NameChanged += BleDevice_NameChanged;
 
 
                             // try to read specific Gatt service uuid (ORIENTATION_SERVICE)
@@ -185,8 +190,7 @@ namespace Timeular
                                                 else
                                                 {
                                                     // tracker device is at its base, whatever got tracked by the application is to be stopped
-                                                    if (lastActivity != null)
-                                                        StopActivity(lastActivity.ToString());
+                                                    StopActivity(lastActivity);
                                                     ShowMessage("Timular", "Not tracking. Tracker is in its base.");
                                                 }
                                             }
@@ -246,11 +250,6 @@ namespace Timeular
             Console.WriteLine("GattServiceChanged:");
         }
 
-        private static void BleDevice_ConnectionParametersChanged(BluetoothLEDevice sender, object args)
-        {
-            Console.WriteLine("ConnectionParametersChanged:" + args.ToString());
-        }
-
         private static void BleDevice_ConnectionStatusChanged(BluetoothLEDevice sender, object args)
         {
             // once the connection status changed event fires, change the "connected" variable => handled in Main thread
@@ -293,8 +292,7 @@ namespace Timeular
                 else
                 {
                     // tracker device is at its base, whatever got tracked by the application is to be stopped
-                    if (lastActivity != null)
-                        StopActivity(lastActivity.ToString());
+                    StopActivity(lastActivity);
                     ShowMessage("Timular", "Not tracking. Tracker is in its base.");
                 }
             }
@@ -330,7 +328,7 @@ namespace Timeular
                     // check if the current activity's project ID is in our list of sides
                     orientation = Array.FindIndex(sides, x => x.ToString() == res[0]["project"]["id"].ToString());
                     // track the current activity's ID in lastActivity as it's required when stopping/modifying an activity
-                    lastActivity = res[0]["id"];
+                    lastActivity = res[0]["id"].ToString();
                     lastStart = (DateTime)res[0]["begin"];
                     ShowMessage("Timeular", "Currently Tracking " + res[0]["project"]["customer"]["name"].ToString());
                 }
@@ -343,62 +341,93 @@ namespace Timeular
         }
         private static async void StartActivity(string projectId, string activity)
         {
-            // if the previous time entry is shorter than 60s, delete it
-            if (DateTime.Now.Subtract(lastStart).TotalSeconds < 60 && lastActivity != null)
-            {
-                DeleteActivity(lastActivity.ToString());
-            }
+            // stop previous activity
+            StopActivity(lastActivity);
+
             // create a new activity in Kimai for the project matching the tracker's current side
             string data = "{\"begin\":\"" + DateTime.Now.ToString("s") + "\",\"project\":" + projectId + ",\"activity\":" + activity + "}";
-            try
+            HttpResponseMessage response = await http.PostAsync(apiHost + "/api/timesheets", new StringContent(data, System.Text.Encoding.UTF8, "application/json"));
+            if( ! response.IsSuccessStatusCode )
             {
-                HttpResponseMessage response = await http.PostAsync(apiHost + "/api/timesheets", new StringContent(data, System.Text.Encoding.UTF8, "application/json"));
-                response.EnsureSuccessStatusCode();
+                var json = await response.Content.ReadAsStringAsync();
+                ShowMessage("Timeular ERROR", "Could not start activity!!!");
+                Console.WriteLine("Error " + response.StatusCode.ToString() + ": " + json.ToString());
+            }
+            else
+            {
                 // the activity ID could be read from the output, but calling GetActivity for showing the message about the current project instead
                 // ("customer" is not part of the above response)
                 GetActiveActivity();
             }
-            catch (HttpRequestException e)
-            {
-                ShowMessage("Timeular ERROR", "Could not start activity!!!");
-                Console.WriteLine("Error :" + e.Message);
-            }
         }
         private static async void StopActivity(string activity)
         {
-            // if the previous time entry is shorter than 60s, delete it
-            if (DateTime.Now.Subtract(lastStart).TotalSeconds < 60)
+            if (activity != null)
             {
-                DeleteActivity(activity);
-            }
-            else
-            {
-                // stop activity in Kimai referenced by activity
-                try
+                // if the previous time entry is shorter than 60s, delete it
+                if (DateTime.Now.Subtract(lastStart).TotalSeconds < 60)
                 {
+                    DeleteActivity(activity);
+                }
+                else
+                {
+                    // stop activity in Kimai referenced by activity
                     HttpResponseMessage response = await http.GetAsync(apiHost + "/api/timesheets/" + activity + "/stop");
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        // sometime a task cannot be stopped, e.g. if the duration exceeded the maximum duration
+                        var json = await response.Content.ReadAsStringAsync();
+                        JToken res = JToken.Parse(json);
+                        res = res.SelectToken("errors.children.duration.errors", errorWhenNoMatch: false);
+                        if (res != null)
+                        {
+                            TimeSpan ts = TimeSpan.Parse("8:00");
+                            if (Regex.IsMatch(res[0].ToString(), @"\d{1,2}:\d{2}"))
+                            {
+                                Match timeString = Regex.Match(res[0].ToString(), @"\d{1,2}:\d{2}");
+                                ts = TimeSpan.Parse(timeString.ToString());
+                            }
+
+                            // PATCH is not available in this .net core
+                            HttpRequestMessage request = new HttpRequestMessage(new HttpMethod("PATCH"), apiHost + "/api/timesheets/" + activity)
+                            {
+                                Content = new StringContent("{\"end\":\"" + lastStart.Add(ts).ToString("s") + "\"}", System.Text.Encoding.UTF8, "application/json")
+                            };
+                            response = await http.SendAsync(request);
+                            if (!response.IsSuccessStatusCode)
+                            {
+                                json = await response.Content.ReadAsStringAsync();
+                                ShowMessage("Timeular ERROR", "Could not modify previous activity!!!");
+                                Console.WriteLine("Error " + response.StatusCode.ToString() + ": " +  json.ToString());
+                            }
+                            else
+                            {
+                                ShowMessage("Timeular NOTICE", "Stopping previous activity after " + ts.TotalHours.ToString() + "h");
+                            }
+                        }
+                        else
+                        {
+                            ShowMessage("Timeular ERROR", "Could not stop activity!!!");
+                            Console.WriteLine("Error :" + json.ToString());
+                        }
+                    }
                 }
-                catch (HttpRequestException e)
-                {
-                    // TODO: in case an activity cannot be stopped due to the duration exceeding the max. allowed duration
-                    //       the activity needs to be modified with an end-date
-                    //        PATCH /api/timesheets/{id}
-                    ShowMessage("Timeular ERROR", "Could not stop activity!!!");
-                    Console.WriteLine("Error :" + e.Message);
-                }
+                // after stopping/deleting an activity unset the lastActivity property
+                lastActivity = null;
             }
         }
         private static async void DeleteActivity(string activity)
         {
-            // delete activity in Kimai referenced by activity
-            try
+            if (activity != null)
             {
+                // delete activity in Kimai referenced by activity
                 HttpResponseMessage response = await http.DeleteAsync(apiHost + "/api/timesheets/" + activity);
-            }
-            catch (HttpRequestException e)
-            {
-                ShowMessage("Timeular ERROR", "Could not delete activity!!!");
-                Console.WriteLine("Error :" + e.Message);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    ShowMessage("Timeular ERROR", "Could not delete activity!!!");
+                    Console.WriteLine("Error " + response.StatusCode.ToString() + ": " + json.ToString());
+                }
             }
         }
     }
