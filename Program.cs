@@ -19,7 +19,7 @@ using Windows.UI.Notifications;
 namespace Timeular
 {
 
-    public class jsonConfig
+    public class JsonConfig
     {
         public string api_user;
         public string api_token;
@@ -34,8 +34,8 @@ namespace Timeular
         [DllImport("User32.dll", CallingConvention = CallingConvention.StdCall, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool ShowWindow([In] IntPtr hWnd, [In] int nCmdShow);
-        private static string ORIENTATION_SERVICE = "c7e70010-c847-11e6-8175-8c89a55d403c";
-        private static string ORIENTATION_CHARACTERISTICS = "c7e70012-c847-11e6-8175-8c89a55d403c";
+        private static readonly string ORIENTATION_SERVICE = "c7e70010-c847-11e6-8175-8c89a55d403c";
+        private static readonly string ORIENTATION_CHARACTERISTICS = "c7e70012-c847-11e6-8175-8c89a55d403c";
 
         private static int orientation = 0;
         private static Boolean found = false;
@@ -52,7 +52,7 @@ namespace Timeular
         private static string lastActivity = null;
         private static DateTime lastStart = DateTime.UtcNow;
 
-        static async Task Main(string[] args)
+        static async Task Main()
         {
             // quit if this program is already running (e.g. a toast message was clicked)
             if (System.Diagnostics.Process.GetProcessesByName(System.IO.Path.GetFileNameWithoutExtension(System.Reflection.Assembly.GetEntryAssembly().Location)).Count() > 1) return;
@@ -66,7 +66,7 @@ namespace Timeular
             if (File.Exists(configFileName))
             {
                 string jsonString = File.ReadAllText(configFileName);
-                jsonConfig settings = JsonConvert.DeserializeObject<jsonConfig>(jsonString);
+                JsonConfig settings = JsonConvert.DeserializeObject<JsonConfig>(jsonString);
                 apiToken = settings.api_token;
                 if (apiToken == "" || apiToken is null)
                 {
@@ -242,7 +242,7 @@ namespace Timeular
         }
         private static void BleDevice_NameChanged(BluetoothLEDevice sender, object args)
         {
-            Console.WriteLine("NameChanged:" + args.ToString());
+            Console.WriteLine("NameChanged:" + sender.Name);
         }
 
         private static void BleDevice_GattServicesChanged(BluetoothLEDevice sender, object args)
@@ -311,6 +311,7 @@ namespace Timeular
             // display notification
             ToastNotifier toastNotifier = ToastNotificationManager.CreateToastNotifier();
             toastNotifier.Show(toastNotification);
+            Console.WriteLine(title + ": " + message);
         }
         private static async void GetActiveActivity()
         {

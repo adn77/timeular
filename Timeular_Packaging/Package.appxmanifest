@@ -8,7 +8,7 @@
 
   <Identity
     Name="ce782b06-5e7f-4dce-a967-4272ef77ee99"
-    Publisher="CN=Alexander Noack"
+    Publisher="E=alexander.noack@murtfeldt.de, CN=&quot;Noack, Alexander&quot;, OU=Alex, OU=IT, OU=Aktive Mitarbeiter, OU=Benutzer, DC=murtfeldt, DC=de"
     Version="1.0.14.0" />
 
   <Properties>
