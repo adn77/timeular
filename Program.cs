@@ -107,12 +107,12 @@ namespace Timeular
             // Register event handlers before starting the watcher.
             // Added, Updated and Removed are required to get all nearby devices
             deviceWatcher.Added += DeviceWatcher_Added;
-            deviceWatcher.Updated += DeviceWatcher_Updated;
-            deviceWatcher.Removed += DeviceWatcher_Removed;
 
             // minimize the console window to the task bar
             IntPtr handle = Process.GetCurrentProcess().MainWindowHandle;
             ShowWindow(handle, 6);
+
+            GattCharacteristicsResult res;
 
             // main loop
             while (true)
@@ -137,12 +137,8 @@ namespace Timeular
                             // try to connect
                             bleDevice = await BluetoothLEDevice.FromIdAsync(device.Id);
 
-
                             // register connection status changed event
                             bleDevice.ConnectionStatusChanged += BleDevice_ConnectionStatusChanged;
-                            bleDevice.GattServicesChanged += BleDevice_GattServicesChanged;
-                            bleDevice.NameChanged += BleDevice_NameChanged;
-
 
                             // try to read specific Gatt service uuid (ORIENTATION_SERVICE)
                             GattDeviceServicesResult result = await bleDevice.GetGattServicesForUuidAsync(new Guid(ORIENTATION_SERVICE));
@@ -150,7 +146,7 @@ namespace Timeular
                             {
                                 Console.WriteLine("Found Orientation Service");
                                 // try to read specific Gatt charactreistic uuid (ORIENTATION_CHARACTERISTICS)
-                                GattCharacteristicsResult res = await result.Services[0].GetCharacteristicsForUuidAsync(new Guid(ORIENTATION_CHARACTERISTICS));
+                                res = await result.Services[0].GetCharacteristicsForUuidAsync(new Guid(ORIENTATION_CHARACTERISTICS));
                                 if (res.Status == GattCommunicationStatus.Success)
                                 {
                                     Console.WriteLine("Found Orientation Characteristics");
@@ -165,43 +161,19 @@ namespace Timeular
                                         GattCommunicationStatus status = await res.Characteristics[0].WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue.Indicate);
                                         if (status == GattCommunicationStatus.Success)
                                         {
-                                            Console.WriteLine("Subscribed to Orientation Changes");
-                                            // register handler for orientation changed event
-                                            res.Characteristics[0].ValueChanged += Characteristic_ValueChanged;
                                             // Stop the watcher
                                             deviceWatcher.Stop();
                                             // set varables to exit while loop
                                             found = true;
                                             connected = true;
 
-                                            // "orientation" is the state of the time tracker application
-                                            // "curr_orientation" is the position of the tracker device
-                                            if (orientation != curr_orientation)
-                                            {
-                                                orientation = curr_orientation;
-                                                if (orientation >= 1 && orientation <= 8)
-                                                {
-                                                    // start tracking with the new tracker device position
-                                                    if (sides.Length > orientation && sides[orientation] != "" && sides[orientation] != null)
-                                                        StartActivity(sides[orientation], defaultActivityId);
-                                                    else
-                                                        ShowMessage("Timular", "No task assigned to side: " + orientation.ToString());
-                                                }
-                                                else
-                                                {
-                                                    // tracker device is at its base, whatever got tracked by the application is to be stopped
-                                                    StopActivity(lastActivity);
-                                                    ShowMessage("Timular", "Not tracking. Tracker is in its base.");
-                                                }
-                                            }
-                                            else
-                                            {
-                                                // tracker is in it's base and application is not tracking anything
-                                                if (orientation == 0 || orientation == 9)
-                                                    ShowMessage("Timeular", "Not tracking. Flip your tracker to get started!");
-                                                // or GetActivity() already posted the current status
-                                                // and the tracker device is in the correct position accordingly
-                                            }
+                                            // register handler for orientation changed event
+                                            res.Characteristics[0].ValueChanged += Characteristic_ValueChanged;
+                                            Console.WriteLine("Subscribed to Orientation Changes");
+
+                                            // "orientation" is the state of the time tracking application
+                                            // "curr_orientation" is the initial position of the tracker device
+                                            CheckOrientationChanged(curr_orientation, orientation);
                                             Console.WriteLine("Press any key to exit");
                                         }
                                         else
@@ -234,20 +206,11 @@ namespace Timeular
                 else
                 {
                     // main loop waiting for keypress to exit
-                    Thread.Sleep(1000);
+                    Thread.Sleep(10000);
                     if (Console.KeyAvailable) break;
                 }
             }
             bleDevice.Dispose();
-        }
-        private static void BleDevice_NameChanged(BluetoothLEDevice sender, object args)
-        {
-            Console.WriteLine("NameChanged:" + sender.Name);
-        }
-
-        private static void BleDevice_GattServicesChanged(BluetoothLEDevice sender, object args)
-        {
-            Console.WriteLine("GattServiceChanged:");
         }
 
         private static void BleDevice_ConnectionStatusChanged(BluetoothLEDevice sender, object args)
@@ -256,20 +219,12 @@ namespace Timeular
             connected = !connected;
             Console.WriteLine("Connected: " + connected);
         }
-        private static void DeviceWatcher_Removed(DeviceWatcher sender, DeviceInformationUpdate args)
-        {
-            //throw new NotImplementedException();
-        }
-        private static void DeviceWatcher_Updated(DeviceWatcher sender, DeviceInformationUpdate args)
-        {
-            //throw new NotImplementedException();
-        }
         private static void DeviceWatcher_Added(DeviceWatcher sender, DeviceInformation args)
         {
             // this event is triggered once a new BLE device has been found
             if (args.Name.Contains("Timeular"))
             {
-                // if the name conatains the string "Timeular", the "device" varible gets set => continue in Main thread
+                // if the name contains the string "Timeular", the "device" variable gets set => continue in Main thread
                 Console.WriteLine("Connecting to " + args.Name);
                 device = args;
             }
@@ -279,22 +234,34 @@ namespace Timeular
             int old_orientation = orientation;
             var reader = DataReader.FromBuffer(args.CharacteristicValue);
             orientation = reader.ReadByte();
-            if (orientation != old_orientation)
+            CheckOrientationChanged(orientation, old_orientation);
+        }
+        private static void CheckOrientationChanged(int current_orientation, int old_orientation)
+        {
+            if (current_orientation != old_orientation)
             {
-                if (orientation >= 1 && orientation <= 8)
+                if (current_orientation >= 1 && current_orientation <= 8)
                 {
                     // start tracking with the new tracker device position
-                    if (sides.Length > orientation && sides[orientation] != "" && sides[orientation] != null)
-                        StartActivity(sides[orientation], defaultActivityId);
+                    if (sides.Length > current_orientation && sides[current_orientation] != "" && sides[current_orientation] != null)
+                        StartActivity(sides[current_orientation], defaultActivityId);
                     else
-                        ShowMessage("Timular", "No task assigned to side: " + orientation.ToString());
+                        ShowMessage("Timeular", "No task assigned to side: " + current_orientation.ToString());
                 }
                 else
                 {
                     // tracker device is at its base, whatever got tracked by the application is to be stopped
                     StopActivity(lastActivity);
-                    ShowMessage("Timular", "Not tracking. Tracker is in its base.");
+                    ShowMessage("Timeular", "Not tracking. Tracker is in its base.");
                 }
+            }
+            else
+            {
+                // tracker is in it's base and application is not tracking anything
+                if (current_orientation == 0 || current_orientation == 9)
+                    ShowMessage("Timeular", "Not tracking. Flip your tracker to get started!");
+                // or GetActivity() already posted the current status
+                // and the tracker device is in the correct position accordingly
             }
         }
         public static void ShowMessage(string title, string message)
