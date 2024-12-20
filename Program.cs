@@ -107,6 +107,8 @@ namespace Timeular
             // Register event handlers before starting the watcher.
             // Added, Updated and Removed are required to get all nearby devices
             deviceWatcher.Added += DeviceWatcher_Added;
+            deviceWatcher.Updated += DeviceWatcher_Updated;
+            deviceWatcher.Removed += DeviceWatcher_Removed;
 
             // minimize the console window to the task bar
             IntPtr handle = Process.GetCurrentProcess().MainWindowHandle;
@@ -121,6 +123,7 @@ namespace Timeular
                 //  or search otherwise
                 if (!connected)
                 {
+                    device = null;
                     found = false;
                     // Start the watcher until Timeular device has been found
                     deviceWatcher.Start();
@@ -180,6 +183,7 @@ namespace Timeular
                                         {
                                             // disconnect the device and start over by searching
                                             Console.WriteLine("Error subscribing to device indication: " + result.Status.ToString());
+                                            bleDevice.ConnectionStatusChanged -= BleDevice_ConnectionStatusChanged;
                                             bleDevice.Dispose();
                                             device = null;
                                         }
@@ -188,6 +192,7 @@ namespace Timeular
                                     {
                                         // disconnect the device and start over by searching
                                         Console.WriteLine("Error reading orientation characteristic's value: " + result.Status.ToString());
+                                        bleDevice.ConnectionStatusChanged -= BleDevice_ConnectionStatusChanged;
                                         bleDevice.Dispose();
                                         device = null;
                                     }
@@ -197,6 +202,7 @@ namespace Timeular
                             {
                                 // disconnect the device and start over by searching
                                 Console.WriteLine("Error getting device services: " + result.Status.ToString());
+                                bleDevice.ConnectionStatusChanged -= BleDevice_ConnectionStatusChanged;
                                 bleDevice.Dispose();
                                 device = null;
                             }
@@ -210,14 +216,21 @@ namespace Timeular
                     if (Console.KeyAvailable) break;
                 }
             }
+            bleDevice.ConnectionStatusChanged -= BleDevice_ConnectionStatusChanged;
             bleDevice.Dispose();
         }
 
         private static void BleDevice_ConnectionStatusChanged(BluetoothLEDevice sender, object args)
         {
             // once the connection status changed event fires, change the "connected" variable => handled in Main thread
-            connected = !connected;
-            Console.WriteLine("Connected: " + connected);
+            if (sender != null)
+            {
+                if (sender.ConnectionStatus == BluetoothConnectionStatus.Connected)
+                    connected = true;
+                else
+                    connected = false;
+                Console.WriteLine("Connected: " + connected);
+            }
         }
         private static void DeviceWatcher_Added(DeviceWatcher sender, DeviceInformation args)
         {
@@ -228,6 +241,15 @@ namespace Timeular
                 Console.WriteLine("Connecting to " + args.Name);
                 device = args;
             }
+        }
+        private static void DeviceWatcher_Updated(DeviceWatcher sender, DeviceInformationUpdate args)
+        {
+            Debug.WriteLine($"Device updated: {args.Id}");
+        }
+
+        private static void DeviceWatcher_Removed(DeviceWatcher sender, DeviceInformationUpdate args)
+        {
+            Debug.WriteLine($"Device removed: {args.Id}");
         }
         private static void Characteristic_ValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args)
         {
@@ -310,16 +332,32 @@ namespace Timeular
         private static async void StartActivity(string projectId, string activity)
         {
             // stop previous activity
-            StopActivity(lastActivity);
+            if ( !(lastActivity is null) ) { StopActivity(lastActivity); }
 
-            // create a new activity in Kimai for the project matching the tracker's current side
-            string data = "{\"begin\":\"" + DateTime.Now.ToString("s") + "\",\"project\":" + projectId + ",\"activity\":" + activity + "}";
-            HttpResponseMessage response = await http.PostAsync(apiHost + "/api/timesheets", new StringContent(data, System.Text.Encoding.UTF8, "application/json"));
-            if( ! response.IsSuccessStatusCode )
+            int retryCount = 0;
+            string data;
+            HttpResponseMessage response = null;
+
+            // try to start activity up to 3 times -
+            // sometimes it fails with "Cannot stop running timesheet" error due to async processing
+            while ( ( response is null || !response.IsSuccessStatusCode ) && retryCount < 3)
+            {
+                if ( retryCount++ > 1)
+                {
+                    Thread.Sleep(1000);
+                }
+                // create a new activity in Kimai for the project matching the tracker's current side
+                data = "{\"begin\":\"" + DateTime.Now.ToString("s") + "\",\"project\":" + projectId + ",\"activity\":" + activity + "}";
+                response = await http.PostAsync(apiHost + "/api/timesheets", new StringContent(data, System.Text.Encoding.UTF8, "application/json"));
+
+                //Console.WriteLine("Debug (" + retryCount.ToString() + "): " + data );
+
+            }
+            if ( ! response.IsSuccessStatusCode )
             {
                 var json = await response.Content.ReadAsStringAsync();
-                ShowMessage("Timeular ERROR", "Could not start activity!!!");
                 Console.WriteLine("Error " + response.StatusCode.ToString() + ": " + json.ToString());
+                ShowMessage("Timeular ERROR", "Could not start activity!!! ");
             }
             else
             {
@@ -380,9 +418,10 @@ namespace Timeular
                         }
                     }
                 }
-                // after stopping/deleting an activity unset the lastActivity property
-                lastActivity = null;
             }
+            // after stopping/deleting an activity unset the lastActivity property
+            lastActivity = null;
+
         }
         private static async void DeleteActivity(string activity)
         {
