@@ -43,13 +43,11 @@ namespace Timeular
         private static DeviceInformation device;
         private static BluetoothLEDevice bleDevice;
 
-        private static string apiUser;
         private static string apiToken;
         private static string apiHost;
-        private static string defaultActivityId;
         private static string[] sides;
         private static HttpClient http;
-        private static string lastActivity = null;
+        private static string lastTimesheet = null;
         private static DateTime lastStart = DateTime.UtcNow;
 
         static async Task Main()
@@ -74,9 +72,7 @@ namespace Timeular
                     Console.ReadKey();
                     Environment.Exit(1);
                 }
-                apiUser = settings.api_user;
                 apiHost = settings.api_host;
-                defaultActivityId = settings.default_activity_id;
                 sides = settings.sides;
             }
             // copy template config file otherwise
@@ -90,12 +86,11 @@ namespace Timeular
             }
 
             http = new HttpClient();
-            // specific Request headers required by Kimai API
-            http.DefaultRequestHeaders.Add("X-AUTH-USER", apiUser);
-            http.DefaultRequestHeaders.Add("X-AUTH-TOKEN", apiToken);
+            // Kimai API Authentication
+            http.DefaultRequestHeaders.Add("Authorization", "Bearer " + apiToken);
 
             // Initialize what's the state in the time tracking application
-            GetActiveActivity();
+            GetActiveTimesheet();
 
             // Prepare the BLE watcher
             string[] requestedProperties = { "System.Devices.Aep.DeviceAddress", "System.Devices.Aep.IsConnected" };
@@ -266,14 +261,14 @@ namespace Timeular
                 {
                     // start tracking with the new tracker device position
                     if (sides.Length > current_orientation && sides[current_orientation] != "" && sides[current_orientation] != null)
-                        StartActivity(sides[current_orientation], defaultActivityId);
+                        StartTimesheet(sides[current_orientation]);
                     else
                         ShowMessage("Timeular", "No task assigned to side: " + current_orientation.ToString());
                 }
                 else
                 {
                     // tracker device is at its base, whatever got tracked by the application is to be stopped
-                    StopActivity(lastActivity);
+                    StopTimesheet(lastTimesheet);
                     ShowMessage("Timeular", "Not tracking. Tracker is in its base.");
                 }
             }
@@ -282,7 +277,7 @@ namespace Timeular
                 // tracker is in it's base and application is not tracking anything
                 if (current_orientation == 0 || current_orientation == 9)
                     ShowMessage("Timeular", "Not tracking. Flip your tracker to get started!");
-                // or GetActivity() already posted the current status
+                // or GetActiveTimesheet() already posted the current status
                 // and the tracker device is in the correct position accordingly
             }
         }
@@ -302,7 +297,7 @@ namespace Timeular
             toastNotifier.Show(toastNotification);
             Console.WriteLine(title + ": " + message);
         }
-        private static async void GetActiveActivity()
+        private static async void GetActiveTimesheet()
         {
             // get active activity from Kimai
             try
@@ -316,11 +311,11 @@ namespace Timeular
                 if (res.HasValues)
                 {
                     // check if the current activity's project ID is in our list of sides
-                    orientation = Array.FindIndex(sides, x => x.ToString() == res[0]["project"]["id"].ToString());
-                    // track the current activity's ID in lastActivity as it's required when stopping/modifying an activity
-                    lastActivity = res[0]["id"].ToString();
+                    orientation = Array.FindIndex(sides, x => x.ToString() == res[0]["project"]["id"].ToString() + '.' + res[0]["activity"]["id"].ToString() );
+                    // track the current timesheet's ID in lastTimesheet as it's required when stopping/modifying an activity
+                    lastTimesheet = res[0]["id"].ToString();
                     lastStart = (DateTime)res[0]["begin"];
-                    ShowMessage("Timeular", "Currently Tracking " + res[0]["project"]["customer"]["name"].ToString());
+                    ShowMessage("Timeular", "Currently Tracking " + res[0]["project"]["customer"]["name"].ToString() +": " + res[0]["project"]["name"].ToString() + " (" + res[0]["activity"]["name"].ToString() + ")");
                 }
             }
             catch (HttpRequestException e)
@@ -329,10 +324,10 @@ namespace Timeular
                 Console.WriteLine("Error :" + e.Message);
             }
         }
-        private static async void StartActivity(string projectId, string activity)
+        private static async void StartTimesheet(string activity)
         {
             // stop previous activity
-            if ( !(lastActivity is null) ) { StopActivity(lastActivity); }
+            if ( !(lastTimesheet is null) ) { StopTimesheet(lastTimesheet); }
 
             int retryCount = 0;
             string data;
@@ -346,8 +341,9 @@ namespace Timeular
                 {
                     Thread.Sleep(1000);
                 }
+                string[] ts = activity.Split('.');
                 // create a new activity in Kimai for the project matching the tracker's current side
-                data = "{\"begin\":\"" + DateTime.Now.ToString("s") + "\",\"project\":" + projectId + ",\"activity\":" + activity + "}";
+                data = "{\"begin\":\"" + DateTime.Now.ToString("s") + "\",\"project\":" + ts[0] + ",\"activity\":" + ts[1] + "}";
                 response = await http.PostAsync(apiHost + "/api/timesheets", new StringContent(data, System.Text.Encoding.UTF8, "application/json"));
 
                 //Console.WriteLine("Debug (" + retryCount.ToString() + "): " + data );
@@ -361,24 +357,24 @@ namespace Timeular
             }
             else
             {
-                // the activity ID could be read from the output, but calling GetActivity for showing the message about the current project instead
+                // the activity ID could be read from the output, but calling GetActiveTimesheet for showing the message about the current project instead
                 // ("customer" is not part of the above response)
-                GetActiveActivity();
+                GetActiveTimesheet();
             }
         }
-        private static async void StopActivity(string activity)
+        private static async void StopTimesheet(string timesheet)
         {
-            if (activity != null)
+            if (timesheet != null)
             {
                 // if the previous time entry is shorter than 60s, delete it
                 if (DateTime.Now.Subtract(lastStart).TotalSeconds < 60)
                 {
-                    DeleteActivity(activity);
+                    DeleteTimesheet(timesheet);
                 }
                 else
                 {
-                    // stop activity in Kimai referenced by activity
-                    HttpResponseMessage response = await http.GetAsync(apiHost + "/api/timesheets/" + activity + "/stop");
+                    // stop activity in Kimai referenced by timesheet
+                    HttpResponseMessage response = await http.GetAsync(apiHost + "/api/timesheets/" + timesheet + "/stop");
                     if (!response.IsSuccessStatusCode)
                     {
                         // sometime a task cannot be stopped, e.g. if the duration exceeded the maximum duration
@@ -395,7 +391,7 @@ namespace Timeular
                             }
 
                             // PATCH is not available in this .net core
-                            HttpRequestMessage request = new HttpRequestMessage(new HttpMethod("PATCH"), apiHost + "/api/timesheets/" + activity)
+                            HttpRequestMessage request = new HttpRequestMessage(new HttpMethod("PATCH"), apiHost + "/api/timesheets/" + timesheet)
                             {
                                 Content = new StringContent("{\"end\":\"" + lastStart.Add(ts).ToString("s") + "\"}", System.Text.Encoding.UTF8, "application/json")
                             };
@@ -419,16 +415,16 @@ namespace Timeular
                     }
                 }
             }
-            // after stopping/deleting an activity unset the lastActivity property
-            lastActivity = null;
+            // after stopping/deleting an activity unset the lastTimesheet property
+            lastTimesheet = null;
 
         }
-        private static async void DeleteActivity(string activity)
+        private static async void DeleteTimesheet(string timesheet)
         {
-            if (activity != null)
+            if (timesheet != null)
             {
-                // delete activity in Kimai referenced by activity
-                HttpResponseMessage response = await http.DeleteAsync(apiHost + "/api/timesheets/" + activity);
+                // delete activity in Kimai referenced by timesheet
+                HttpResponseMessage response = await http.DeleteAsync(apiHost + "/api/timesheets/" + timesheet);
                 if (!response.IsSuccessStatusCode)
                 {
                     var json = await response.Content.ReadAsStringAsync();

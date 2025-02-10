@@ -64,7 +64,7 @@
     <AppxSymbolPackageEnabled>False</AppxSymbolPackageEnabled>
     <GenerateTestArtifacts>True</GenerateTestArtifacts>
     <AppxBundlePlatforms>neutral</AppxBundlePlatforms>
-    <HoursBetweenUpdateChecks>720</HoursBetweenUpdateChecks>
+    <HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
     <AppxPackageDir>M:\TeamIT\Timeular\</AppxPackageDir>
     <AppInstallerUri>https://zeit.murtfeldt.de/timeular/</AppInstallerUri>
   </PropertyGroup>
