@@ -12,16 +12,11 @@ trigger any other application.
 
 On first Start the *timular.json* file will be copied to the user's *Documents* folder.
 
-Please edit this file and add **api_host**, **api_user**, **api_key** values which can be found in the user management of Kimai.
+Please edit this file and add **api_host**, **api_key** values which can be found in the user management of Kimai.
 
-The **sides** array assigns Kimai project IDs to each side
+The **sides** array assigns Kimai project IDs and activity IDs to each side, separated by a dot "."
 
     => Resting in its base = index 0 and index 10
-    => Side 1              = index 1 = example project ID 456
-    => Side 2              = index 2 = example project ID 145
+    => Side 1              = index 1 = 1.8 - example project ID 1 and activity ID 8 
+    => Side 2              = index 2 = 2.7 - example project ID 2 and activity ID 7
     ... etc.
-
-The **default_activity_id** is a required attribute when starting an activity in Kimai. It should be the same in all projects you want to track.
-I usually create a *Timeular Default* activity as first activity when a project is created in Kimai.
-
-Anything tracked by this application will always use this activity ID, no matter which project gets tracked!
