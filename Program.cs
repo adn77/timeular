@@ -37,6 +37,9 @@ namespace Timeular
         private static readonly string ORIENTATION_SERVICE = "c7e70010-c847-11e6-8175-8c89a55d403c";
         private static readonly string ORIENTATION_CHARACTERISTICS = "c7e70012-c847-11e6-8175-8c89a55d403c";
 
+        private static readonly string BATTERY_SERVICE = "0000180f-0000-1000-8000-00805f9b34fb";
+        private static readonly string BATTERY_LEVEL_CHARACTERISTICS = "00002a19-0000-1000-8000-00805f9b34fb";
+
         private static int orientation = 0;
         private static Boolean found = false;
         private static Boolean connected = false;
@@ -166,7 +169,7 @@ namespace Timeular
                                             connected = true;
 
                                             // register handler for orientation changed event
-                                            res.Characteristics[0].ValueChanged += Characteristic_ValueChanged;
+                                            res.Characteristics[0].ValueChanged += OrientationCharacteristic_ValueChanged;
                                             Console.WriteLine("Subscribed to Orientation Changes");
 
                                             // "orientation" is the state of the time tracking application
@@ -246,15 +249,42 @@ namespace Timeular
         {
             Debug.WriteLine($"Device removed: {args.Id}");
         }
-        private static void Characteristic_ValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args)
+        private static void OrientationCharacteristic_ValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args)
         {
             int old_orientation = orientation;
             var reader = DataReader.FromBuffer(args.CharacteristicValue);
             orientation = reader.ReadByte();
             CheckOrientationChanged(orientation, old_orientation);
         }
-        private static void CheckOrientationChanged(int current_orientation, int old_orientation)
+
+        private static async Task CheckBatteryLevel()
         {
+            // try to read battery level
+            GattDeviceServicesResult result = await bleDevice.GetGattServicesForUuidAsync(new Guid(BATTERY_SERVICE));
+            if (result.Status == GattCommunicationStatus.Success)
+            {
+                GattCharacteristicsResult res = await result.Services[0].GetCharacteristicsForUuidAsync(new Guid(BATTERY_LEVEL_CHARACTERISTICS));
+                if (res.Status == GattCommunicationStatus.Success)
+                {
+                    // read current characteristics value (current battery level)
+                    GattReadResult r = await res.Characteristics[0].ReadValueAsync();
+                    if (r.Status == GattCommunicationStatus.Success)
+                    {
+                        var reader = DataReader.FromBuffer(r.Value);
+                        int batteryLevel = reader.ReadByte();
+                        Console.WriteLine("Battery level: " + batteryLevel.ToString() + "%");
+                        if (batteryLevel <= 20 ) ShowMessage("Timeular WARNING", "Battery Level low: " + batteryLevel.ToString() + "% !!!");
+                    }
+                    else Console.WriteLine("Error reading battery level: " + r.Status.ToString());
+                }
+                else Console.WriteLine("Error reading battery characteristic's value: " + res.Status.ToString());
+            }
+            else Console.WriteLine("Error getting battery service: " + result.Status.ToString());
+        }
+
+        private static async void CheckOrientationChanged(int current_orientation, int old_orientation)
+        {
+            await CheckBatteryLevel();
             if (current_orientation != old_orientation)
             {
                 if (current_orientation >= 1 && current_orientation <= 8)
