@@ -273,7 +273,7 @@ namespace Timeular
                         var reader = DataReader.FromBuffer(r.Value);
                         int batteryLevel = reader.ReadByte();
                         Console.WriteLine("Battery level: " + batteryLevel.ToString() + "%");
-                        if (batteryLevel <= 20 ) ShowMessage("Timeular WARNING", "Battery Level low: " + batteryLevel.ToString() + "% !!!");
+                        if (batteryLevel <= 40 ) ShowMessage("Timeular WARNING", "Battery Level low: " + batteryLevel.ToString() + "% !!!");
                     }
                     else Console.WriteLine("Error reading battery level: " + r.Status.ToString());
                 }
