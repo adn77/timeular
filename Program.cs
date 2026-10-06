@@ -404,7 +404,12 @@ namespace Timeular
                 else
                 {
                     // stop activity in Kimai referenced by timesheet
-                    HttpResponseMessage response = await http.GetAsync(apiHost + "/api/timesheets/" + timesheet + "/stop");
+                    // PATCH is not available in this .net core
+                    HttpRequestMessage request = new HttpRequestMessage(new HttpMethod("PATCH"), apiHost + "/api/timesheets/" + timesheet + "/stop")
+                    {
+                        Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json")
+                    };
+                    HttpResponseMessage response = await http.SendAsync(request);
                     if (!response.IsSuccessStatusCode)
                     {
                         // sometime a task cannot be stopped, e.g. if the duration exceeded the maximum duration
@@ -421,7 +426,7 @@ namespace Timeular
                             }
 
                             // PATCH is not available in this .net core
-                            HttpRequestMessage request = new HttpRequestMessage(new HttpMethod("PATCH"), apiHost + "/api/timesheets/" + timesheet)
+                            request = new HttpRequestMessage(new HttpMethod("PATCH"), apiHost + "/api/timesheets/" + timesheet)
                             {
                                 Content = new StringContent("{\"end\":\"" + lastStart.Add(ts).ToString("s") + "\"}", System.Text.Encoding.UTF8, "application/json")
                             };
